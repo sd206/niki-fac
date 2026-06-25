@@ -7,7 +7,8 @@ WORKDIR /app
 FROM base AS build
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json ./
 COPY packages ./packages
-COPY services/document-service ./services/document-service
+COPY services ./services
+COPY apps ./apps
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @niki/document-service... build
 
