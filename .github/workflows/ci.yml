@@ -22,6 +22,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Create web .env
+        run: cp apps/web/.env.ci apps/web/.env
+
       - name: Typecheck
         run: pnpm typecheck
 
