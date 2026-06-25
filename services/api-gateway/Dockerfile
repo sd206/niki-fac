@@ -1,0 +1,19 @@
+FROM node:22-slim AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+WORKDIR /app
+
+FROM base AS build
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json ./
+COPY packages ./packages
+COPY services/api-gateway ./services/api-gateway
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @niki/api-gateway... build
+
+FROM base AS runtime
+ENV NODE_ENV=production
+COPY --from=build /app /app
+WORKDIR /app/services/api-gateway
+EXPOSE 8080
+CMD ["node", "dist/index.js"]

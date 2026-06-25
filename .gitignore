@@ -1,0 +1,36 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+.turbo/
+coverage/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+.env
+.env.*
+!.env.example
+
+.expo/
+.expo-shared/
+web-build/
+
+*.tsbuildinfo
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Terraform
+infra/terraform/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# Secrets / service accounts
+*serviceAccount*.json
+*.pem

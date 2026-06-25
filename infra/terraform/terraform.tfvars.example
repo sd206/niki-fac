@@ -1,0 +1,4 @@
+project_id          = "niki-dev-123456"
+region              = "us-central1"
+environment         = "dev"
+firebase_project_id = "niki-dev-123456"

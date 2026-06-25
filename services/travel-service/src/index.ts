@@ -1,0 +1,20 @@
+import express from "express";
+import { pinoHttp } from "pino-http";
+import { travelRouter } from "./routes.js";
+
+const app = express();
+app.use(pinoHttp());
+app.use(express.json());
+
+const PORT = Number(process.env.PORT ?? 8088);
+
+app.get("/healthz", (_req, res) => {
+  res.json({ status: "ok", service: "travel-service" });
+});
+
+app.use("/travel", travelRouter);
+
+app.listen(PORT, () => {
+  // eslint-disable-next-line no-console
+  console.log(`travel-service listening on :${PORT}`);
+});

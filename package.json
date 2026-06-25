@@ -1,0 +1,30 @@
+{
+  "name": "niki",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Niki Family OS - AI-powered Family Operating System on the Google stack",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean",
+    "emulator": "firebase emulators:start --only auth --project demo-niki",
+    "dev:services": "turbo run dev --filter=@niki/api-gateway --filter=@niki/family-service --filter=@niki/calendar-service"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/react": "19.2.17",
+      "@types/react-dom": "19.2.3"
+    }
+  }
+}

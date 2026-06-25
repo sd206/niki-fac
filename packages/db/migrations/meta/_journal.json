@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1782367166238,
+      "tag": "0000_oval_hydra",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782399870938,
+      "tag": "0001_gray_prowler",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782400661390,
+      "tag": "0002_burly_whistler",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782412217598,
+      "tag": "0003_concerned_tombstone",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782413865784,
+      "tag": "0004_0004_ai_memory_kg",
+      "breakpoints": true
+    }
+  ]
+}
