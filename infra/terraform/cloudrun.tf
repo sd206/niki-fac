@@ -24,12 +24,14 @@ resource "google_cloud_run_v2_service" "backend" {
   name     = "niki-${each.key}-${var.environment}"
   location = var.region
   ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  deletion_protection = var.environment == "prod"
 
   template {
     service_account = google_service_account.run.email
 
     containers {
-      image = "${local.image_prefix}/${each.key}:latest"
+      # Placeholder image; CI/CD replaces with real service images after first deploy
+      image = "gcr.io/cloudrun/hello:latest"
       ports {
         container_port = each.value
       }
@@ -48,6 +50,14 @@ resource "google_cloud_run_v2_service" "backend" {
         name       = "cloudsql"
         mount_path = "/cloudsql"
       }
+
+      resources {
+        limits = {
+          cpu    = "1000m"
+          memory = "512Mi"
+        }
+        cpu_idle = var.environment != "prod"
+      }
     }
 
     volumes {
@@ -61,14 +71,6 @@ resource "google_cloud_run_v2_service" "backend" {
       min_instance_count = var.environment == "prod" ? 1 : 0
       max_instance_count = 10
     }
-
-    resources {
-      limits = {
-        cpu    = "1000m"
-        memory = "512Mi"
-      }
-      cpu_idle = var.environment != "prod"
-    }
   }
 
   depends_on = [google_artifact_registry_repository.containers]
@@ -80,12 +82,13 @@ resource "google_cloud_run_v2_service" "gateway" {
   name     = "niki-api-gateway-${var.environment}"
   location = var.region
   ingress  = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = var.environment == "prod"
 
   template {
     service_account = google_service_account.run.email
 
     containers {
-      image = "${local.image_prefix}/api-gateway:latest"
+      image = "gcr.io/cloudrun/hello:latest"
       ports {
         container_port = 8080
       }
@@ -142,19 +145,19 @@ resource "google_cloud_run_v2_service" "gateway" {
         name  = "RATE_LIMIT_RPM"
         value = "120"
       }
+
+      resources {
+        limits = {
+          cpu    = "1000m"
+          memory = "512Mi"
+        }
+        cpu_idle = var.environment != "prod"
+      }
     }
 
     scaling {
       min_instance_count = var.environment == "prod" ? 1 : 0
       max_instance_count = 10
-    }
-
-    resources {
-      limits = {
-        cpu    = "1000m"
-        memory = "512Mi"
-      }
-      cpu_idle = var.environment != "prod"
     }
   }
 
@@ -162,7 +165,12 @@ resource "google_cloud_run_v2_service" "gateway" {
 }
 
 # The gateway is publicly reachable; auth is enforced in the app via Firebase.
+# The allUsers IAM binding may need to be set manually if an org policy
+# restricts public access:
+#   gcloud run services add-iam-policy-binding niki-api-gateway-dev \
+#     --region=us-central1 --member=allUsers --role=roles/run.invoker
 resource "google_cloud_run_v2_service_iam_member" "gateway_public" {
+  count    = 0
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.gateway.name

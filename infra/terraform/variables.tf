@@ -21,6 +21,6 @@ variable "firebase_project_id" {
 
 variable "db_tier" {
   type        = string
-  default     = "db-custom-1-3840"
+  default     = "db-g1-small"
   description = "Cloud SQL machine tier"
 }
