@@ -48,8 +48,8 @@ function serviceProxy(target: string, prefix: string, downstream: string) {
         fixRequestBody(proxyReq, req as express.Request);
       },
       error: (err, req, res) => {
-        console.error(`[proxy error] ${prefix} -> ${target}:`, err.message, err.code);
-        if (res && !res.headersSent) {
+        console.error(`[proxy error] ${prefix} -> ${target}:`, err.message, (err as NodeJS.ErrnoException).code);
+        if (res && "headersSent" in res && !res.headersSent) {
           (res as express.Response).status(503).json({ error: { code: "proxy_error", message: err.message, target } });
         }
       },
