@@ -53,12 +53,14 @@ jobs:
         env:
           ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
         run: |
-          ARGS="--image $IMAGE --region $REGION --quiet --port 8080 --gen2"
-          if [ "${{ matrix.service }}" = "api-gateway" ]; then
-            ARGS="$ARGS --allow-unauthenticated"
-          fi
-          echo "Running: gcloud run deploy niki-${{ matrix.service }}-${ENVIRONMENT} $ARGS --project ${{ secrets.GCP_PROJECT_ID }}"
-          gcloud run deploy niki-${{ matrix.service }}-${ENVIRONMENT} $ARGS --project ${{ secrets.GCP_PROJECT_ID }}
+          SERVICE="niki-${{ matrix.service }}-${ENVIRONMENT}"
+          echo "Updating $SERVICE with image $IMAGE..."
+          gcloud run services update "$SERVICE" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --project ${{ secrets.GCP_PROJECT_ID }} \
+            --quiet 2>&1
+          echo "Deploy exit code: $?"
 
       - name: Smoke test
         continue-on-error: true
