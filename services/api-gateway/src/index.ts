@@ -31,6 +31,7 @@ const ANALYTICS_SERVICE_URL = process.env.ANALYTICS_SERVICE_URL ?? "http://local
  * downstream, and re-streams the JSON body consumed by express.json().
  */
 function serviceProxy(target: string, prefix: string, downstream: string) {
+  console.log(`[proxy] ${prefix} -> ${target}${downstream}`);
   return createProxyMiddleware({
     target,
     changeOrigin: true,
@@ -46,12 +47,37 @@ function serviceProxy(target: string, prefix: string, downstream: string) {
         }
         fixRequestBody(proxyReq, req as express.Request);
       },
+      error: (err, req, res) => {
+        console.error(`[proxy error] ${prefix} -> ${target}:`, err.message, err.code);
+        if (res && !res.headersSent) {
+          (res as express.Response).status(503).json({ error: { code: "proxy_error", message: err.message, target } });
+        }
+      },
     },
   });
 }
 
 app.get("/healthz", (_req, res) => {
   res.json({ status: "ok", service: "api-gateway" });
+});
+
+app.get("/debug/proxy-test", async (_req, res) => {
+  const results: Record<string, string> = {};
+  const urls: Record<string, string | undefined> = {
+    FAMILY_SERVICE_URL,
+    CALENDAR_SERVICE_URL,
+    TASKS_SERVICE_URL,
+  };
+  for (const [name, url] of Object.entries(urls)) {
+    if (!url) { results[name] = "not set"; continue; }
+    try {
+      const resp = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(5000) });
+      results[name] = `HTTP ${resp.status}`;
+    } catch (err: any) {
+      results[name] = `ERROR: ${err.message} (code: ${err.code ?? "none"})`;
+    }
+  }
+  res.json({ results });
 });
 
 app.get("/api/v1/whoami", requireAuth, (req, res) => {
