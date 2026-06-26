@@ -1,7 +1,6 @@
 import type { WhoAmIResponse } from "@niki/shared-types";
 import cors from "cors";
 import express from "express";
-import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
 import { pinoHttp } from "pino-http";
 import { requireAuth } from "./middleware/auth.js";
 import { rateLimit } from "./middleware/rateLimit.js";
@@ -26,35 +25,43 @@ const KG_SERVICE_URL = process.env.KG_SERVICE_URL ?? "http://localhost:8090";
 const ANALYTICS_SERVICE_URL = process.env.ANALYTICS_SERVICE_URL ?? "http://localhost:8091";
 
 /**
- * Builds an app-level proxy that only handles requests under `prefix` (so the
- * full URL is preserved for rewriting), forwards the verified identity
- * downstream, and re-streams the JSON body consumed by express.json().
+ * Fetch-based proxy that forwards requests to a backend service.
+ * Replaces http-proxy-middleware which had connectivity issues on Cloud Run.
  */
-function serviceProxy(target: string, prefix: string, downstream: string) {
+function fetchProxy(target: string, prefix: string, downstream: string) {
   console.log(`[proxy] ${prefix} -> ${target}${downstream}`);
-  return createProxyMiddleware({
-    target,
-    changeOrigin: true,
-    pathFilter: (path) => path.startsWith(prefix),
-    pathRewrite: { [`^${prefix}`]: downstream },
-    on: {
-      proxyReq: (proxyReq, req) => {
-        const user = (req as express.Request).user;
-        if (user) {
-          proxyReq.setHeader("x-user-id", user.uid);
-          proxyReq.setHeader("x-user-email", user.email ?? "");
-          proxyReq.setHeader("x-user-name", user.displayName ?? "");
-        }
-        fixRequestBody(proxyReq, req as express.Request);
-      },
-      error: (err, req, res) => {
-        console.error(`[proxy error] ${prefix} -> ${target}:`, err.message, (err as NodeJS.ErrnoException).code);
-        if (res && "headersSent" in res && !res.headersSent) {
-          (res as express.Response).status(503).json({ error: { code: "proxy_error", message: err.message, target } });
-        }
-      },
-    },
-  });
+  return async (req: express.Request, res: express.Response) => {
+    const user = req.user;
+    const rewrittenPath = req.originalUrl.replace(new RegExp(`^${prefix}`), downstream);
+    const url = `${target}${rewrittenPath}`;
+
+    const headers: Record<string, string> = {
+      "Content-Type": req.get("Content-Type") ?? "application/json",
+    };
+    if (user) {
+      headers["x-user-id"] = user.uid;
+      headers["x-user-email"] = user.email ?? "";
+      headers["x-user-name"] = user.displayName ?? "";
+    }
+
+    try {
+      const fetchOptions: RequestInit = {
+        method: req.method,
+        headers,
+      };
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        fetchOptions.body = JSON.stringify(req.body);
+      }
+      const resp = await fetch(url, { ...fetchOptions, signal: AbortSignal.timeout(60000) });
+      const contentType = resp.headers.get("content-type") ?? "application/json";
+      res.status(resp.status).type(contentType);
+      const body = await resp.text();
+      res.send(body);
+    } catch (err: any) {
+      console.error(`[proxy error] ${prefix} -> ${target}:`, err.message, err.cause?.code ?? "");
+      res.status(503).json({ error: { code: "proxy_error", message: err.message, target } });
+    }
+  };
 }
 
 app.get("/healthz", (_req, res) => {
@@ -74,7 +81,7 @@ app.get("/debug/proxy-test", async (_req, res) => {
       const resp = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(5000) });
       results[name] = `HTTP ${resp.status}`;
     } catch (err: any) {
-      results[name] = `ERROR: ${err.message} (code: ${err.code ?? "none"})`;
+      results[name] = `ERROR: ${err.message}`;
     }
   }
   res.json({ results });
@@ -92,32 +99,25 @@ app.get("/api/v1/whoami", requireAuth, (req, res) => {
 });
 
 // Forward authenticated traffic. Auth is verified at the edge; the verified
-// uid is passed downstream via X-User-Id. requireAuth is mounted on the path
-// so unauthenticated requests are rejected before the app-level proxy runs.
-app.use("/api/v1/families", requireAuth);
-app.use("/api/v1/calendar", requireAuth);
-app.use("/api/v1/tasks", requireAuth);
-app.use("/api/v1/notifications", requireAuth);
-app.use("/api/v1/finance", requireAuth);
-app.use("/api/v1/documents", requireAuth);
-app.use("/api/v1/meals", requireAuth);
-app.use("/api/v1/travel", requireAuth);
-app.use("/api/v1/ai", requireAuth);
-app.use("/api/v1/knowledge-graph", requireAuth);
-app.use("/api/v1/analytics", requireAuth);
-app.use(serviceProxy(FAMILY_SERVICE_URL, "/api/v1/families", "/families"));
-app.use(serviceProxy(CALENDAR_SERVICE_URL, "/api/v1/calendar", "/calendar"));
-app.use(serviceProxy(TASKS_SERVICE_URL, "/api/v1/tasks", "/tasks"));
-app.use(serviceProxy(NOTIFICATION_SERVICE_URL, "/api/v1/notifications", "/notifications"));
-app.use(serviceProxy(FINANCE_SERVICE_URL, "/api/v1/finance", "/finance"));
-app.use(serviceProxy(DOCUMENT_SERVICE_URL, "/api/v1/documents", "/documents"));
-app.use(serviceProxy(MEAL_SERVICE_URL, "/api/v1/meals", "/meals"));
-app.use(serviceProxy(TRAVEL_SERVICE_URL, "/api/v1/travel", "/travel"));
-app.use(serviceProxy(AI_SERVICE_URL, "/api/v1/ai", "/ai"));
-app.use(serviceProxy(KG_SERVICE_URL, "/api/v1/knowledge-graph", "/kg"));
-app.use(serviceProxy(ANALYTICS_SERVICE_URL, "/api/v1/analytics", "/analytics"));
+// uid is passed downstream via X-User-Id.
+const PROXY_ROUTES: Array<[string, string, string, string]> = [
+  ["/api/v1/families", FAMILY_SERVICE_URL, "/api/v1/families", "/families"],
+  ["/api/v1/calendar", CALENDAR_SERVICE_URL, "/api/v1/calendar", "/calendar"],
+  ["/api/v1/tasks", TASKS_SERVICE_URL, "/api/v1/tasks", "/tasks"],
+  ["/api/v1/notifications", NOTIFICATION_SERVICE_URL, "/api/v1/notifications", "/notifications"],
+  ["/api/v1/finance", FINANCE_SERVICE_URL, "/api/v1/finance", "/finance"],
+  ["/api/v1/documents", DOCUMENT_SERVICE_URL, "/api/v1/documents", "/documents"],
+  ["/api/v1/meals", MEAL_SERVICE_URL, "/api/v1/meals", "/meals"],
+  ["/api/v1/travel", TRAVEL_SERVICE_URL, "/api/v1/travel", "/travel"],
+  ["/api/v1/ai", AI_SERVICE_URL, "/api/v1/ai", "/ai"],
+  ["/api/v1/knowledge-graph", KG_SERVICE_URL, "/api/v1/knowledge-graph", "/kg"],
+  ["/api/v1/analytics", ANALYTICS_SERVICE_URL, "/api/v1/analytics", "/analytics"],
+];
+
+for (const [route, target, prefix, downstream] of PROXY_ROUTES) {
+  app.use(route, requireAuth, fetchProxy(target, prefix, downstream));
+}
 
 app.listen(PORT, () => {
-  // eslint-disable-next-line no-console
   console.log(`api-gateway listening on :${PORT}`);
 });
