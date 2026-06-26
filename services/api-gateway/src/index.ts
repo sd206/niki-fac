@@ -52,10 +52,12 @@ function fetchProxy(target: string, prefix: string, downstream: string) {
       if (req.method !== "GET" && req.method !== "HEAD") {
         fetchOptions.body = JSON.stringify(req.body);
       }
+      console.log(`[proxy] fetch ${req.method} ${url}`);
       const resp = await fetch(url, { ...fetchOptions, signal: AbortSignal.timeout(60000) });
       const contentType = resp.headers.get("content-type") ?? "application/json";
-      res.status(resp.status).type(contentType);
       const body = await resp.text();
+      console.log(`[proxy] response ${resp.status} from ${url}: ${body.substring(0, 200)}`);
+      res.status(resp.status).type(contentType);
       res.send(body);
     } catch (err: any) {
       console.error(`[proxy error] ${prefix} -> ${target}:`, err.message, err.cause?.code ?? "");
@@ -70,16 +72,16 @@ app.get("/healthz", (_req, res) => {
 
 app.get("/debug/proxy-test", async (_req, res) => {
   const results: Record<string, string> = {};
-  const urls: Record<string, string | undefined> = {
-    FAMILY_SERVICE_URL,
-    CALENDAR_SERVICE_URL,
-    TASKS_SERVICE_URL,
-  };
-  for (const [name, url] of Object.entries(urls)) {
-    if (!url) { results[name] = "not set"; continue; }
+  const tests: Array<[string, string]> = [
+    ["FAMILY_SERVICE_URL/healthz", `${FAMILY_SERVICE_URL}/healthz`],
+    ["FAMILY_SERVICE_URL/families", `${FAMILY_SERVICE_URL}/families`],
+    ["CALENDAR_SERVICE_URL/healthz", `${CALENDAR_SERVICE_URL}/healthz`],
+  ];
+  for (const [name, url] of tests) {
     try {
-      const resp = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(5000) });
-      results[name] = `HTTP ${resp.status}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      const body = await resp.text();
+      results[name] = `HTTP ${resp.status}: ${body.substring(0, 100)}`;
     } catch (err: any) {
       results[name] = `ERROR: ${err.message}`;
     }
