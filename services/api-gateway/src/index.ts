@@ -25,45 +25,55 @@ const KG_SERVICE_URL = process.env.KG_SERVICE_URL ?? "http://localhost:8090";
 const ANALYTICS_SERVICE_URL = process.env.ANALYTICS_SERVICE_URL ?? "http://localhost:8091";
 
 /**
- * Fetch-based proxy that forwards requests to a backend service.
- * Replaces http-proxy-middleware which had connectivity issues on Cloud Run.
+ * Wraps an async Express middleware so unhandled rejections are passed to
+ * next() instead of silently hanging the request (Express 4 limitation).
+ */
+function asyncHandler(
+  fn: (req: express.Request, res: express.Response, next: express.NextFunction) => Promise<void>,
+) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
+/**
+ * Fetch-based proxy: receives an authenticated request, forwards it to the
+ * backend service via fetch(), and streams the response back.
  */
 function fetchProxy(target: string, prefix: string, downstream: string) {
   console.log(`[proxy] ${prefix} -> ${target}${downstream}`);
-  return async (req: express.Request, res: express.Response) => {
+  return asyncHandler(async (req, res) => {
     const user = req.user;
     const rewrittenPath = req.originalUrl.replace(new RegExp(`^${prefix}`), downstream);
     const url = `${target}${rewrittenPath}`;
 
-    const headers: Record<string, string> = {
-      "Content-Type": req.get("Content-Type") ?? "application/json",
-    };
+    // Build headers - only set non-empty values, no Content-Type on GET
+    const headers: Record<string, string> = {};
     if (user) {
       headers["x-user-id"] = user.uid;
-      headers["x-user-email"] = user.email ?? "";
-      headers["x-user-name"] = user.displayName ?? "";
+      if (user.email) headers["x-user-email"] = user.email;
+      if (user.displayName) headers["x-user-name"] = user.displayName;
+    }
+
+    const fetchOptions: RequestInit = { method: req.method, headers };
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      headers["Content-Type"] = "application/json";
+      fetchOptions.body = JSON.stringify(req.body);
     }
 
     try {
-      const fetchOptions: RequestInit = {
-        method: req.method,
-        headers,
-      };
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        fetchOptions.body = JSON.stringify(req.body);
-      }
-      console.log(`[proxy] fetch ${req.method} ${url}`);
+      console.log(`[proxy] ${req.method} ${url}`);
       const resp = await fetch(url, { ...fetchOptions, signal: AbortSignal.timeout(60000) });
       const contentType = resp.headers.get("content-type") ?? "application/json";
       const body = await resp.text();
-      console.log(`[proxy] response ${resp.status} from ${url}: ${body.substring(0, 200)}`);
+      console.log(`[proxy] ${resp.status} ${url} -> ${body.substring(0, 120)}`);
       res.status(resp.status).type(contentType);
       res.send(body);
     } catch (err: any) {
-      console.error(`[proxy error] ${prefix} -> ${target}:`, err.message, err.cause?.code ?? "");
-      res.status(503).json({ error: { code: "proxy_error", message: err.message, target } });
+      console.error(`[proxy error] ${prefix}:`, err.message);
+      res.status(502).json({ error: { code: "proxy_error", message: err.message, url } });
     }
-  };
+  });
 }
 
 app.get("/healthz", (_req, res) => {
@@ -72,14 +82,15 @@ app.get("/healthz", (_req, res) => {
 
 app.get("/debug/proxy-test", async (_req, res) => {
   const results: Record<string, string> = {};
-  const tests: Array<[string, string]> = [
-    ["FAMILY_SERVICE_URL/healthz", `${FAMILY_SERVICE_URL}/healthz`],
-    ["FAMILY_SERVICE_URL/families", `${FAMILY_SERVICE_URL}/families`],
-    ["CALENDAR_SERVICE_URL/healthz", `${CALENDAR_SERVICE_URL}/healthz`],
+  const tests: Array<[string, string, Record<string, string>]> = [
+    ["FAMILY/healthz", `${FAMILY_SERVICE_URL}/healthz`, {}],
+    ["FAMILY/families-no-headers", `${FAMILY_SERVICE_URL}/families`, {}],
+    ["FAMILY/families-with-uid", `${FAMILY_SERVICE_URL}/families`, { "x-user-id": "test-proxy-debug" }],
+    ["FAMILY/families-ct-json", `${FAMILY_SERVICE_URL}/families`, { "Content-Type": "application/json" }],
   ];
-  for (const [name, url] of tests) {
+  for (const [name, url, hdrs] of tests) {
     try {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      const resp = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(10000) });
       const body = await resp.text();
       results[name] = `HTTP ${resp.status}: ${body.substring(0, 100)}`;
     } catch (err: any) {
@@ -100,8 +111,7 @@ app.get("/api/v1/whoami", requireAuth, (req, res) => {
   res.json({ data: body });
 });
 
-// Forward authenticated traffic. Auth is verified at the edge; the verified
-// uid is passed downstream via X-User-Id.
+// Proxy routes: auth verified at edge, uid passed downstream via X-User-Id
 const PROXY_ROUTES: Array<[string, string, string, string]> = [
   ["/api/v1/families", FAMILY_SERVICE_URL, "/api/v1/families", "/families"],
   ["/api/v1/calendar", CALENDAR_SERVICE_URL, "/api/v1/calendar", "/calendar"],
@@ -119,6 +129,14 @@ const PROXY_ROUTES: Array<[string, string, string, string]> = [
 for (const [route, target, prefix, downstream] of PROXY_ROUTES) {
   app.use(route, requireAuth, fetchProxy(target, prefix, downstream));
 }
+
+// Catch-all error handler
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("[gateway error]", err);
+  if (!res.headersSent) {
+    res.status(err.status ?? 500).json({ error: { code: "internal_error", message: err.message } });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`api-gateway listening on :${PORT}`);
