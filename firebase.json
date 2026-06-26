@@ -8,5 +8,19 @@
       "port": 4000
     },
     "singleProjectMode": true
+  },
+  "hosting": {
+    "site": "niki-factory",
+    "public": "apps/web/out",
+    "cleanUrls": true,
+    "trailingSlash": false,
+    "rewrites": [
+      { "source": "/**", "destination": "/404.html" }
+    ],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
   }
 }
