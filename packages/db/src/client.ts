@@ -6,7 +6,10 @@ let pool: Pool | undefined;
 
 export function getPool(): Pool {
   if (!pool) {
-    const connectionString = process.env.DATABASE_URL;
+    // Strip BOM (byte order mark) that can appear if the secret was created
+    // on Windows or with certain encodings. A leading BOM breaks URL parsing
+    // in the pg library, causing "no PostgreSQL user name specified" errors.
+    const connectionString = (process.env.DATABASE_URL ?? "").replace(/^\uFEFF/, "");
     if (!connectionString) {
       throw new Error("DATABASE_URL is not set");
     }
