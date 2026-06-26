@@ -1,3 +1,4 @@
+import "express-async-errors";
 import express from "express";
 import { pinoHttp } from "pino-http";
 import { mealRouter } from "./routes.js";
@@ -13,6 +14,13 @@ app.get("/healthz", (_req, res) => {
 });
 
 app.use("/meals", mealRouter);
+
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("[error]", err);
+  if (!res.headersSent) {
+    res.status(err.status ?? 500).json({ error: { code: "internal_error", message: err.message } });
+  }
+});
 
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console

@@ -46,6 +46,11 @@ resource "google_cloud_run_v2_service" "backend" {
         }
       }
 
+      env {
+        name  = "CLOUD_SQL_CONNECTION_NAME"
+        value = local.sql_connection
+      }
+
       volume_mounts {
         name       = "cloudsql"
         mount_path = "/cloudsql"
